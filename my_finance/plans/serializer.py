@@ -1,20 +1,27 @@
 from rest_framework import serializers
-from .models import Asset, CashFlow, PlanEvent
+from .models import Asset, CashFlow, Event
+
 
 class AssetSerializer(serializers.ModelSerializer):
     class Meta:
         model = Asset
-        fields = '__all__'
-        read_only_fields = ('user',)
+        fields = ['id', 'name', 'amount', 'asset_type', 'growth_rate', 'annual_income_rate', 'liquidity_penalty',
+                  'created_at', 'updated_at']
+        read_only_fields = ['id', 'created_at', 'updated_at']
+
 
 class CashFlowSerializer(serializers.ModelSerializer):
     class Meta:
         model = CashFlow
-        fields = '__all__'
-        read_only_fields = ('user',)
+        fields = ['id', 'name', 'amount', 'flow_type', 'frequency', 'created_at', 'updated_at']
+        read_only_fields = ['id', 'created_at', 'updated_at']
 
-class PlanEventSerializer(serializers.ModelSerializer):
+
+class EventSerializer(serializers.ModelSerializer):
+    cash_flow_name = serializers.CharField(source='cash_flow.name', read_only=True, default=None)
+
     class Meta:
-        model = PlanEvent
-        fields = '__all__'
-        read_only_fields = ('user',)
+        model = Event
+        fields = ['id', 'name', 'event_type', 'month', 'cash_flow', 'cash_flow_name', 'amount', 'description',
+                  'created_at', 'updated_at']
+        read_only_fields = ['id', 'created_at', 'updated_at']
