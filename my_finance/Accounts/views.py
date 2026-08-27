@@ -1,7 +1,10 @@
+# backend/Accounts/views.py
 from rest_framework.views import APIView
 from rest_framework.response import Response
-from .models import Account
+from rest_framework.permissions import IsAuthenticated
+
 from Transactions.models import Transaction
+from .models import Account
 from .serializers import AccountSerializer
 from django.db.models import Sum, Q
 from datetime import datetime, timedelta
@@ -9,6 +12,8 @@ from django.shortcuts import get_object_or_404
 
 
 class AccountListView(APIView):
+    permission_classes = [IsAuthenticated]
+
     def get(self, request):
         accounts = Account.objects.filter(owner=request.user)
         serializer = AccountSerializer(accounts, many=True)
@@ -33,6 +38,8 @@ class AccountListView(APIView):
 
 
 class AccountSummaryView(APIView):
+    permission_classes = [IsAuthenticated]
+
     def get(self, request):
         accounts = Account.objects.filter(owner=request.user)
         assets = accounts.filter(is_debt=False)
@@ -68,16 +75,20 @@ class AccountSummaryView(APIView):
             current_balance = float(acc.balance)
 
             for d in dates:
-                future_trans = Transaction.objects.filter(account=acc, date__gt=d).aggregate(
-                    inc=Sum('amount', filter=Q(kind='income')),
-                    exp=Sum('amount', filter=Q(kind='expense'))
-                )
+                # اگر Transaction وجود ندارد، از آن صرف‌نظر کنید
+                if Transaction.objects.filter(account=acc).exists():
+                    future_trans = Transaction.objects.filter(account=acc, date__gt=d).aggregate(
+                        inc=Sum('amount', filter=Q(kind='income')),
+                        exp=Sum('amount', filter=Q(kind='expense'))
+                    )
 
-                income_after = float(future_trans['inc'] or 0)
-                expense_after = float(future_trans['exp'] or 0)
+                    income_after = float(future_trans['inc'] or 0)
+                    expense_after = float(future_trans['exp'] or 0)
 
-                historical_balance = current_balance - income_after + expense_after
-                daily_balances.append(round(historical_balance, 2))
+                    historical_balance = current_balance - income_after + expense_after
+                    daily_balances.append(round(historical_balance, 2))
+                else:
+                    daily_balances.append(round(current_balance, 2))
 
             chart_series.append({
                 'name': acc.name,

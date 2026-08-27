@@ -5,3 +5,4 @@ class AccountSerializer(serializers.ModelSerializer):
     class Meta:
         model = Account
         fields = ['id', 'name', 'balance', 'is_debt','type', 'color']
+        read_only_fields = ['id']

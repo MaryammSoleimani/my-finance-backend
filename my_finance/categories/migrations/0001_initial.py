@@ -15,17 +15,17 @@ class Migration(migrations.Migration):
 
     operations = [
         migrations.CreateModel(
-            name='Account',
+            name='Category',
             fields=[
-                ('id', models.AutoField(primary_key=True, serialize=False)),
-                ('name', models.CharField(max_length=100)),
-                ('balance', models.DecimalField(decimal_places=2, max_digits=10)),
-                ('is_debt', models.BooleanField(default=False)),
+                ('id', models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
+                ('name', models.CharField(max_length=255)),
                 ('color', models.CharField(default='#3b82f6', max_length=7)),
-                ('owner', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, to=settings.AUTH_USER_MODEL)),
+                ('created_at', models.DateTimeField(auto_now_add=True)),
+                ('user', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='categories', to=settings.AUTH_USER_MODEL)),
             ],
             options={
-                'db_table': 'accounts',
+                'db_table': 'categories',
+                'ordering': ['name'],
             },
         ),
     ]
