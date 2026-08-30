@@ -154,9 +154,13 @@ class SimulationEngine:
         return steps
 
     def _add_months(self, source_date, months):
-        """افزودن ماه به تاریخ"""
+        """افزودن ماه به تاریخ - با مدیریت روزهای نامعتبر"""
         month = source_date.month - 1 + months
         year = source_date.year + month // 12
         month = month % 12 + 1
-        day = min(source_date.day, [31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31][month - 1])
+
+        import calendar
+        last_day = calendar.monthrange(year, month)[1]
+        day = min(source_date.day, last_day)
+
         return date(year, month, day)
