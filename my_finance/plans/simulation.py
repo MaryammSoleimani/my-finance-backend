@@ -10,7 +10,6 @@ class SimulationEngine:
         self.end_date = end_date or (self.start_date + timedelta(days=365 * 5))
 
     def calculate_summary(self):
-        """محاسبه خلاصه شبیه‌سازی"""
         assets = Asset.objects.filter(user=self.user)
         cash_flows = CashFlow.objects.filter(user=self.user)
 
@@ -28,7 +27,6 @@ class SimulationEngine:
         }
 
     def calculate_timeline(self):
-        """محاسبه نمودار زمانی - دقیقاً مطابق Simulation Steps"""
         assets = Asset.objects.filter(user=self.user)
         cash_flows = CashFlow.objects.filter(user=self.user)
         events = Event.objects.filter(user=self.user)
@@ -44,7 +42,6 @@ class SimulationEngine:
         illiquid_data = []
 
         for month_index, month in enumerate(months):
-            # محاسبه ورودی‌ها و خروجی‌ها در این ماه
             monthly_in = sum(cf.amount for cf in cash_flows if cf.flow_type == 'in')
             monthly_out = sum(cf.amount for cf in cash_flows if cf.flow_type == 'out')
 
@@ -56,19 +53,16 @@ class SimulationEngine:
                     elif event.event_type == 'expense_change':
                         monthly_out += event.amount
                     elif event.event_type == 'asset_transfer':
-                        # انتقال دارایی - مقدار را از liquid به illiquid منتقل می‌کنیم
+
                         pass
 
-            # محاسبه دارایی‌ها با در نظر گرفتن رشد و جریان‌های نقدی
             total_liquid = 0
             total_illiquid = 0
 
             for asset in assets:
                 monthly_growth = asset.growth_rate / 100 / 12
-                # رشد مرکب ماهانه
                 asset_value = asset.amount * (1 + monthly_growth) ** (month_index + 1)
 
-                # اضافه کردن درآمد ماهانه
                 monthly_income = asset.annual_income_rate / 100 / 12 * asset.amount
                 asset_value += monthly_income * (month_index + 1)
 
@@ -77,7 +71,6 @@ class SimulationEngine:
                 else:
                     total_illiquid += asset_value
 
-            # اضافه کردن جریان نقدی خالص به liquid
             net_cash_flow = monthly_in - monthly_out
             total_liquid += net_cash_flow * (month_index + 1)
 
@@ -91,7 +84,6 @@ class SimulationEngine:
         }
 
     def calculate_steps(self):
-        """محاسبه مراحل شبیه‌سازی ماهانه - دقیقاً مطابق نمودار"""
         assets = Asset.objects.filter(user=self.user)
         cash_flows = CashFlow.objects.filter(user=self.user)
         events = Event.objects.filter(user=self.user)
@@ -113,10 +105,8 @@ class SimulationEngine:
                     elif event.event_type == 'expense_change':
                         monthly_out += event.amount
 
-            # محاسبه خالص
             net = monthly_in - monthly_out
 
-            # محاسبه دارایی‌ها
             total_liquid = 0
             total_illiquid = 0
 
@@ -124,7 +114,6 @@ class SimulationEngine:
                 monthly_growth = asset.growth_rate / 100 / 12
                 asset_value = asset.amount * (1 + monthly_growth) ** month_index
 
-                # اضافه کردن درآمد ماهانه
                 monthly_income = asset.annual_income_rate / 100 / 12 * asset.amount
                 asset_value += monthly_income * month_index
 
@@ -133,7 +122,6 @@ class SimulationEngine:
                 else:
                     total_illiquid += asset_value
 
-            # اضافه کردن جریان نقدی خالص به liquid
             total_liquid += net * month_index
 
             total_assets = total_liquid + total_illiquid
@@ -154,7 +142,6 @@ class SimulationEngine:
         return steps
 
     def _add_months(self, source_date, months):
-        """افزودن ماه به تاریخ - با مدیریت روزهای نامعتبر"""
         month = source_date.month - 1 + months
         year = source_date.year + month // 12
         month = month % 12 + 1
