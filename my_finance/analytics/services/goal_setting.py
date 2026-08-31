@@ -1,44 +1,145 @@
 from decimal import Decimal
-from Transactions.models import Transaction
 from Accounts.models import Account
 
 
 class SmartGoalCalculator:
+
     def __init__(self, user, goal_amount, months):
         self.user = user
         self.goal_amount = Decimal(str(goal_amount))
-        self.months = months
-        self.transactions = Transaction.objects.filter(user=user)
+        self.months = int(months)
+
         self.accounts = Account.objects.filter(owner=user)
 
     def calculate(self):
-        """محاسبه امکان‌پذیری هدف"""
-        # میانگین پس‌انداز ماهانه - تبدیل به Decimal
-        monthly_income = sum(t.amount for t in self.transactions.filter(kind='income')) / 3
-        monthly_expenses = sum(t.amount for t in self.transactions.filter(kind='expense')) / 3
 
-        # تبدیل به Decimal
-        monthly_income = Decimal(str(monthly_income))
-        monthly_expenses = Decimal(str(monthly_expenses))
-        monthly_savings = monthly_income - monthly_expenses
+        # =========================================================
+        # 1. Validate input
+        # =========================================================
 
-        # پس‌انداز فعلی - تبدیل به Decimal
-        current_savings = sum(a.balance for a in self.accounts if not a.is_debt)
-        current_savings = Decimal(str(current_savings))
+        if self.goal_amount <= 0:
+            raise ValueError("Goal amount must be greater than zero.")
 
-        # پیش‌بینی
-        projected_savings = current_savings + (monthly_savings * self.months)
-        needed_monthly_savings = (self.goal_amount - current_savings) / self.months if self.months > 0 else Decimal('0')
+        if self.months <= 0:
+            raise ValueError("Timeframe must be greater than zero.")
 
-        # امکان‌پذیری
-        is_feasible = projected_savings >= self.goal_amount
-        additional_savings_needed = max(Decimal('0'), needed_monthly_savings - monthly_savings)
+        # =========================================================
+        # 2. Required monthly saving
+        # =========================================================
+
+        required_monthly_savings = (
+            self.goal_amount / Decimal(self.months)
+        )
+
+        # =========================================================
+        # 3. Total assets
+        # =========================================================
+
+        total_assets = sum(
+            (
+                account.balance
+                for account in self.accounts
+                if not account.is_debt
+            ),
+            Decimal("0")
+        )
+
+        # =========================================================
+        # 4. Required saving compared with total assets
+        # =========================================================
+
+        if total_assets > 0:
+            asset_ratio = (
+                required_monthly_savings / total_assets
+            ) * Decimal("100")
+        else:
+            asset_ratio = Decimal("100")
+
+        # =========================================================
+        # 5. Feasibility
+        # =========================================================
+
+        if total_assets <= 0:
+            risk_level = "high"
+            risk_status = "danger"
+
+        elif asset_ratio <= Decimal("5"):
+            risk_level = "low"
+            risk_status = "good"
+
+        elif asset_ratio <= Decimal("15"):
+            risk_level = "reasonable"
+            risk_status = "ok"
+
+        elif asset_ratio <= Decimal("30"):
+            risk_level = "challenging"
+            risk_status = "warning"
+
+        else:
+            risk_level = "high"
+            risk_status = "danger"
+
+        # =========================================================
+        # 6. User-friendly recommendation
+        # =========================================================
+
+        monthly_text = f"${required_monthly_savings:,.2f}"
+        goal_text = f"${self.goal_amount:,.2f}"
+
+        if risk_level == "low":
+
+            recommendation = (
+                f"You need to save {monthly_text} per month "
+                f"to reach your {goal_text} goal in {self.months} months. "
+                f"This goal looks achievable and should not put significant "
+                f"pressure on your current financial position."
+            )
+
+        elif risk_level == "reasonable":
+
+            recommendation = (
+                f"You need to save {monthly_text} per month "
+                f"to reach your {goal_text} goal in {self.months} months. "
+                f"This goal looks achievable, but you will need to maintain "
+                f"consistent monthly savings."
+            )
+
+        elif risk_level == "challenging":
+
+            recommendation = (
+                f"You need to save {monthly_text} per month "
+                f"to reach your {goal_text} goal in {self.months} months. "
+                f"This goal may be challenging compared with your current "
+                f"financial position. Consider extending the timeframe."
+            )
+
+        else:
+
+            recommendation = (
+                f"You need to save {monthly_text} per month "
+                f"to reach your {goal_text} goal in {self.months} months. "
+                f"This target may be difficult compared with your current "
+                f"financial position. Consider reducing the goal amount "
+                f"or extending the timeframe."
+            )
+
+        # =========================================================
+        # 7. Return result
+        # =========================================================
 
         return {
-            'is_feasible': is_feasible,
-            'current_savings': float(current_savings),
-            'monthly_savings': float(monthly_savings),
-            'needed_monthly_savings': float(needed_monthly_savings),
-            'additional_savings_needed': float(additional_savings_needed),
-            'projected_savings': float(projected_savings)
+            "goal_amount": float(self.goal_amount),
+            "months": self.months,
+            "required_monthly_savings": round(
+                float(required_monthly_savings), 2
+            ),
+            "total_assets": round(
+                float(total_assets), 2
+            ),
+            "asset_ratio": round(
+                float(asset_ratio), 2
+            ),
+            "risk_level": risk_level,
+            "risk_status": risk_status,
+            "recommendation": recommendation,
         }
