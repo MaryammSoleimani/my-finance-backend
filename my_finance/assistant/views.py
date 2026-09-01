@@ -5,6 +5,7 @@ from .services.gemini_service import GeminiService
 from Accounts.models import Account
 from Transactions.models import Transaction
 
+
 class AssistantView(APIView):
     permission_classes = [IsAuthenticated]
 

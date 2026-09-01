@@ -10,7 +10,7 @@ class GeminiService:
             'gemini-3.6-flash',  # به جای gemini-3.6-flash (این مدل وجود نداره!)
             system_instruction=self._get_system_instruction()
         )
-        # کش کردن دیتا در حافظه برای استفاده مجدد
+        #کش کردن دیتا در حافظه برای استفاده مجدد
         #self.user_data = None
         #self.is_first_message = True
 
