@@ -1,7 +1,6 @@
 import google.generativeai as genai
 from django.conf import settings
 
-
 class GeminiService:
     def __init__(self):
         genai.configure(api_key=settings.GOOGLE_API_KEY)
