@@ -30,6 +30,22 @@ class AccountListView(APIView):
         )
         return Response({"message": "Account created!"}, status=201)
 
+    # ✅ متد ویرایش (Edit)
+    def put(self, request, pk):
+        account = get_object_or_404(Account, pk=pk, owner=request.user)
+        data = request.data
+
+        account.name = data.get('name', account.name)
+        account.balance = data.get('balance', account.balance)
+        account.color = data.get('color', account.color)
+        account.is_debt = data.get('is_debt', account.is_debt)
+        account.type = data.get('type', account.type)
+        account.save()
+
+        serializer = AccountSerializer(account)
+        return Response(serializer.data)
+
+    # ✅ متد حذف (Delete)
     def delete(self, request, pk):
         account = get_object_or_404(Account, pk=pk, owner=request.user)
         account.delete()
