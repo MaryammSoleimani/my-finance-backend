@@ -198,6 +198,99 @@ class TransactionViewSet(viewsets.ModelViewSet):
             'categories': categories
         })
 
+    @action(detail=False, methods=['get'], url_path='daily-deposits')
+    def daily_deposits(self, request):
+        period = request.query_params.get('period', 'current-month')
+        category = request.query_params.get('category', '')
+
+        transactions = Transaction.objects.filter(
+            user=request.user,
+            kind='income'
+        )
+
+        if period == 'current-month':
+            start_date = datetime.now().replace(
+                day=1,
+                hour=0,
+                minute=0,
+                second=0
+            )
+
+            transactions = transactions.filter(
+                date__gte=start_date
+            )
+
+        elif period == 'last-month':
+            today = datetime.now()
+
+            first_day_current = today.replace(
+                day=1,
+                hour=0,
+                minute=0,
+                second=0
+            )
+
+            last_day_prev = first_day_current - timedelta(days=1)
+            first_day_prev = last_day_prev.replace(day=1)
+
+            transactions = transactions.filter(
+                date__gte=first_day_prev,
+                date__lte=last_day_prev
+            )
+
+        elif period == 'last-year':
+            today = datetime.now()
+
+            first_day_current_year = today.replace(
+                month=1,
+                day=1,
+                hour=0,
+                minute=0,
+                second=0
+            )
+
+            last_day_prev_year = first_day_current_year - timedelta(days=1)
+
+            first_day_prev_year = last_day_prev_year.replace(
+                month=1,
+                day=1
+            )
+
+            transactions = transactions.filter(
+                date__gte=first_day_prev_year,
+                date__lte=last_day_prev_year
+            )
+
+        elif period == 'all-time':
+            pass
+
+        elif period == 'per-day':
+            pass
+
+        if category and category != 'all':
+            transactions = transactions.filter(
+                category__name=category
+            )
+
+        daily_data = transactions.annotate(
+            day=TruncDay('date')
+        ).values('day').annotate(
+            total=Sum('amount')
+        ).order_by('day')
+
+        data = []
+        categories = []
+
+        for item in daily_data:
+            data.append(float(item['total']))
+            categories.append(
+                item['day'].strftime('%b %d')
+            )
+
+        return Response({
+            'data': data,
+            'categories': categories
+        })
     @action(detail=False, methods=['get'])
     def latest(self, request):
         transactions = Transaction.objects.filter(user=request.user).order_by('-date', '-id')[:10]
