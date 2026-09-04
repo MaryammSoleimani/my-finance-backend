@@ -1,4 +1,3 @@
-# backend/analytics/views.py
 from django.core.cache import cache
 from rest_framework.views import APIView
 from rest_framework.response import Response
@@ -13,7 +12,6 @@ class HealthScoreView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        # کش کردن نتیجه به مدت 5 دقیقه
         cache_key = f'health_score_{request.user.id}'
         cached_result = cache.get(cache_key)
 
@@ -22,7 +20,7 @@ class HealthScoreView(APIView):
 
         calculator = HealthScoreCalculator(request.user)
         result = calculator.calculate()
-        cache.set(cache_key, result, 300)  # 5 دقیقه
+        cache.set(cache_key, result, 300)
 
         return Response(result)
 
@@ -31,7 +29,6 @@ class AnomalyDetectionView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        # کش کردن نتیجه به مدت 5 دقیقه
         cache_key = f'anomaly_alerts_{request.user.id}'
         cached_result = cache.get(cache_key)
 
