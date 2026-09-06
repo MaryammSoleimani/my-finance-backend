@@ -9,11 +9,7 @@ def create_notifications(sender, instance, created, **kwargs):
     if not created or instance.kind != 'expense':
         return
 
-    budget = Budget.objects.filter(
-        user=instance.user,
-        category=instance.category
-    ).first()
-
+    budget = Budget.objects.filter(user=instance.user,category=instance.category).first()
     if budget:
         from django.db.models import Sum
         from datetime import datetime
@@ -23,16 +19,17 @@ def create_notifications(sender, instance, created, **kwargs):
             user=instance.user,
             category=instance.category,
             kind='expense',
-            date__gte=start_date
-        ).aggregate(total=Sum('amount'))['total'] or 0
+            date__gte=start_date).aggregate(total=Sum('amount'))['total'] or 0
+        total_spent = float(total_spent)
+        budget_amount = float(budget.amount)
 
-        percentage = (total_spent / float(budget.amount)) * 100
+        percentage = (total_spent / budget_amount) * 100
 
         if percentage >= 100:
             Notification.objects.create(
                 user=instance.user,
                 title='Budget Exceeded',
-                message=f'You have exceeded your {budget.name} budget by ${total_spent - budget.amount:.2f}',
+                message=f'You have exceeded your {budget.name} budget by {total_spent - budget_amount:.0f} تومان',
                 type='budget'
             )
         elif percentage >= 80:
@@ -74,7 +71,6 @@ def restore_budget(sender, instance, **kwargs):
 def update_account_balance(sender, instance, created, **kwargs):
     if created:
         account = instance.account
-        # چون در مدل Account از DecimalField استفاده کردی، بهتر است تبدیل انجام شود
         from decimal import Decimal
         amount = Decimal(str(instance.amount))
 
