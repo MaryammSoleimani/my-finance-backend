@@ -8,10 +8,14 @@ class BudgetSerializer(serializers.ModelSerializer):
     category_color = serializers.CharField(source='category.color', read_only=True)
     spent_amount = serializers.SerializerMethodField()
     percentage_used = serializers.SerializerMethodField()
+    amount_toman = serializers.SerializerMethodField()
+    spent_amount_toman = serializers.SerializerMethodField()
+
 
     class Meta:
         model = Budget
-        fields = ['id', 'name', 'amount', 'reset_period', 'category', 'category_name', 'category_color', 'spent_amount',
+        fields = ['id', 'name', 'amount', 'amount_toman', 'reset_period', 'category',
+                  'category_name', 'category_color', 'spent_amount', 'spent_amount_toman',
                   'percentage_used', 'created_at', 'updated_at']
         read_only_fields = ['id', 'created_at', 'updated_at']
 
@@ -33,8 +37,15 @@ class BudgetSerializer(serializers.ModelSerializer):
 
         return float(total)
 
+    def get_spent_amount_toman(self, obj):
+        return self.get_spent_amount(obj)
+
+    def get_amount_toman(self, obj):
+        return float(obj.amount)
+
     def get_percentage_used(self, obj):
         spent = self.get_spent_amount(obj)
         if obj.amount > 0:
             return round((spent / float(obj.amount)) * 100, 2)
         return 0
+
