@@ -166,8 +166,6 @@ class HealthScoreCalculator:
 
         total_assets = Decimal(str(total_assets))
         total_liabilities = Decimal(str(total_liabilities))
-
-        # No debt
         if total_liabilities <= 0:
 
             return {
@@ -177,8 +175,6 @@ class HealthScoreCalculator:
                 "label": "No Debt",
                 "debt_ratio": 0,
             }
-
-        # Cannot calculate ratio without assets
         if total_assets <= 0:
 
             return {

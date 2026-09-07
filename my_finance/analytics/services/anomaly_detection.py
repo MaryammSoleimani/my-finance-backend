@@ -3,6 +3,7 @@ from datetime import datetime, timedelta
 from django.db.models import Sum, Avg, StdDev
 from Transactions.models import Transaction
 from categories.models import Category
+from django.db.models.functions import TruncMonth
 
 class AnomalyDetector:
     def __init__(self, user):
@@ -25,15 +26,12 @@ class AnomalyDetector:
             date__gte=three_months_ago
         )
 
-        # گروه‌بندی بر اساس دسته و ماه
-        from django.db.models.functions import TruncMonth
         monthly_data = transactions.annotate(
             month=TruncMonth('date')
         ).values('category', 'month').annotate(
             total=Sum('amount')
         ).order_by('category', 'month')
 
-        # محاسبه میانگین و انحراف معیار برای هر دسته
         category_data = {}
         for item in monthly_data:
             cat_id = item['category']
