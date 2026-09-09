@@ -1,5 +1,3 @@
-"""Category matching and auto-creation for imported bank transactions."""
-
 from dataclasses import dataclass
 from typing import Optional, Dict, List, Tuple
 from decimal import Decimal
