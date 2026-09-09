@@ -15,7 +15,7 @@ import jdatetime
 
 from categories.models import Category
 from Accounts.models import Account
-from .category_classifier import classify_transaction, normalize_text
+from .category_classifier import classify_transaction, normalize_text, match_category
 from .models import Transaction
 from .serializers import TransactionSerializer
 
@@ -38,6 +38,7 @@ class TransactionViewSet(viewsets.ModelViewSet):
     def import_csv(self, request):
         uploaded_file = request.FILES.get('file')
         account_id = request.data.get('account')
+
         if not uploaded_file:
             return Response({'success': False, 'message': 'Please select a CSV file.'}, status=400)
         if not account_id:
@@ -60,16 +61,23 @@ class TransactionViewSet(viewsets.ModelViewSet):
                 'message': 'Invalid bank CSV format. Transaction header could not be found.',
             }, status=400)
 
+        # ============================================
+        # INITIALIZE VARIABLES
+        # ============================================
         active_categories = list(Category.objects.filter(
             user=request.user, is_active=True,
         ))
-        imported_count = skipped_count = error_count = unmatched_count = 0
-        errors = []
-        unmatched = []
 
-        # Imported statements may contain historical rows.  They are retained
-        # for reporting, but must not apply the account/budget delta a second
-        # time because those balances already represent the current state.
+        imported_count = 0
+        skipped_count = 0
+        error_count = 0
+        unmatched_count = 0
+        errors = []
+        unmatched_transactions = []  # این لیست برای ذخیره موقت
+
+        # ============================================
+        # PROCESS ROWS
+        # ============================================
         with db_transaction.atomic():
             for row_number, row in enumerate(rows[header_index + 1:], start=header_index + 2):
                 try:
@@ -83,30 +91,64 @@ class TransactionViewSet(viewsets.ModelViewSet):
                     errors.append({'row': row_number, 'message': str(error)})
                     continue
 
-                category = classify_transaction(description, kind, active_categories)
-                if category is None:
-                    unmatched_count += 1
-                    unmatched.append({
-                        'row': row_number, 'description': description, 'kind': kind,
-                        'message': 'No matching active category was found.',
-                    })
-                    continue
+                # ============================================
+                # Match or Auto-Create Category
+                # ============================================
+                category, was_created = match_category(
+                    description, kind, active_categories, request.user
+                )
 
+                # If category was created, add it to active_categories for future rows
+                if was_created:
+                    active_categories.append(category)
+
+                # Duplicate check
                 if Transaction.objects.filter(
-                    user=request.user, account=account, date=transaction_date,
-                    amount=amount, kind=kind, desc=description,
+                        user=request.user,
+                        account=account,
+                        date=transaction_date,
+                        amount=amount,
+                        kind=kind,
+                        desc=description,
                 ).exists():
                     skipped_count += 1
                     continue
 
+                # ============================================
+                # Store unmatched transactions for later
+                # ============================================
+                if category is None:
+                    unmatched_transactions.append({
+                        'row': row_number,
+                        'date': transaction_date.strftime('%Y-%m-%d'),
+                        'description': description,
+                        'amount': float(amount),
+                        'kind': kind,
+                        'account_id': account.id,
+                        'account_name': account.name,
+                        # ❌ حذف: 'user': request.user,  ← این مشکل رو ایجاد میکنه
+                        # ❌ حذف: 'account': account,     ← این هم مشکل داره
+                    })
+                    unmatched_count += 1
+                    continue
+
+                # Create transaction
                 imported_transaction = Transaction(
-                    user=request.user, date=transaction_date, amount=amount,
-                    desc=description, kind=kind, account=account, category=category,
+                    user=request.user,
+                    date=transaction_date,
+                    amount=amount,
+                    desc=description,
+                    kind=kind,
+                    account=account,
+                    category=category,
                     affects_financial_totals=False,
                 )
                 imported_transaction.save()
                 imported_count += 1
 
+        # ============================================
+        # Return response with unmatched transactions
+        # ============================================
         return Response({
             'success': True,
             'message': 'CSV import completed.',
@@ -115,9 +157,9 @@ class TransactionViewSet(viewsets.ModelViewSet):
             'errors_count': error_count,
             'errors': errors[:20],
             'unmatched_count': unmatched_count,
-            'unmatched': unmatched[:20],
+            'unmatched': unmatched_transactions[:20],
+            'has_unmatched': len(unmatched_transactions) > 0,
         })
-
     @staticmethod
     def _read_csv_rows(file_content):
         for encoding in ('utf-8-sig', 'cp1256'):
@@ -126,6 +168,74 @@ class TransactionViewSet(viewsets.ModelViewSet):
             except UnicodeDecodeError:
                 continue
         raise ValueError('Could not read CSV file: unsupported encoding.')
+
+    @action(detail=False, methods=['post'], url_path='save-unmatched')
+    def save_unmatched(self, request):
+        """Save transactions that were previously unmatched with user-selected categories."""
+
+        transactions_data = request.data.get('transactions', [])
+        if not transactions_data:
+            return Response({'success': False, 'message': 'No transactions provided.'}, status=400)
+
+        saved_count = 0
+        errors = []
+
+        for tx_data in transactions_data:
+            try:
+                category_id = tx_data.get('category_id')
+                account_id = tx_data.get('account_id')
+
+                if not category_id:
+                    errors.append({
+                        'row': tx_data.get('row', 'unknown'),
+                        'error': 'No category selected'
+                    })
+                    continue
+
+                # Get category and account (with user validation)
+                category = Category.objects.get(id=category_id, user=request.user, is_active=True)
+                account = Account.objects.get(id=account_id, owner=request.user)
+
+                # Parse date from string
+                from datetime import datetime
+                transaction_date = datetime.strptime(tx_data.get('date'), '%Y-%m-%d').date()
+
+                # Create the transaction
+                transaction = Transaction(
+                    user=request.user,
+                    date=transaction_date,
+                    amount=Decimal(str(tx_data.get('amount'))),
+                    desc=tx_data.get('description', ''),
+                    kind=tx_data.get('kind', 'expense'),
+                    account=account,
+                    category=category,
+                    affects_financial_totals=False,
+                )
+                transaction.save()
+                saved_count += 1
+
+            except Category.DoesNotExist:
+                errors.append({
+                    'row': tx_data.get('row', 'unknown'),
+                    'error': 'Category not found or not active'
+                })
+            except Account.DoesNotExist:
+                errors.append({
+                    'row': tx_data.get('row', 'unknown'),
+                    'error': 'Account not found'
+                })
+            except Exception as e:
+                errors.append({
+                    'row': tx_data.get('row', 'unknown'),
+                    'error': str(e)
+                })
+
+        return Response({
+            'success': True,
+            'saved': saved_count,
+            'errors': errors,
+            'total': len(transactions_data)
+        })
 
     @staticmethod
     def _find_transaction_header(rows):
