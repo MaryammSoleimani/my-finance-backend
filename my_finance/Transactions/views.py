@@ -15,6 +15,7 @@ import jdatetime
 
 from categories.models import Category
 from Accounts.models import Account
+from .category_classifier import classify_transaction, normalize_text
 from .models import Transaction
 from .serializers import TransactionSerializer
 
@@ -33,477 +34,142 @@ class TransactionViewSet(viewsets.ModelViewSet):
     # IMPORT BANK CSV
     # =========================================================
 
-    @action(
-        detail=False,
-        methods=['post'],
-        url_path='import-csv'
-    )
+    @action(detail=False, methods=['post'], url_path='import-csv')
     def import_csv(self, request):
-
         uploaded_file = request.FILES.get('file')
-
-        if not uploaded_file:
-            return Response(
-                {
-                    'success': False,
-                    'message': 'Please select a CSV file.'
-                },
-                status=400
-            )
-
         account_id = request.data.get('account')
-        expense_category_id = request.data.get('expense_category')
-        income_category_id = request.data.get('income_category')
-
+        if not uploaded_file:
+            return Response({'success': False, 'message': 'Please select a CSV file.'}, status=400)
         if not account_id:
-            return Response(
-                {
-                    'success': False,
-                    'message': 'Please select an account.'
-                },
-                status=400
-            )
-
-        # -----------------------------------------------------
-        # Get user's account
-        # -----------------------------------------------------
+            return Response({'success': False, 'message': 'Please select an account.'}, status=400)
 
         try:
-            account = Account.objects.get(
-                id=account_id,
-                owner=request.user
-            )
+            account = Account.objects.get(id=account_id, owner=request.user)
         except Account.DoesNotExist:
-            return Response(
-                {
-                    'success': False,
-                    'message': 'Selected account was not found.'
-                },
-                status=400
-            )
-
-        # -----------------------------------------------------
-        # Get categories
-        # -----------------------------------------------------
-
-        expense_category = None
-        income_category = None
-
-        if expense_category_id:
-            try:
-                expense_category = Category.objects.get(
-                    id=expense_category_id,
-                    user=request.user
-                )
-            except Category.DoesNotExist:
-                return Response(
-                    {
-                        'success': False,
-                        'message': 'Selected expense category was not found.'
-                    },
-                    status=400
-                )
-
-        if income_category_id:
-            try:
-                income_category = Category.objects.get(
-                    id=income_category_id,
-                    user=request.user
-                )
-            except Category.DoesNotExist:
-                return Response(
-                    {
-                        'success': False,
-                        'message': 'Selected income category was not found.'
-                    },
-                    status=400
-                )
-
-        # -----------------------------------------------------
-        # Read CSV
-        # -----------------------------------------------------
+            return Response({'success': False, 'message': 'Selected account was not found.'}, status=400)
 
         try:
-            file_content = uploaded_file.read()
+            rows = self._read_csv_rows(uploaded_file.read())
+        except ValueError as error:
+            return Response({'success': False, 'message': str(error)}, status=400)
 
-            try:
-                decoded_file = file_content.decode('utf-8-sig')
-            except UnicodeDecodeError:
-                try:
-                    decoded_file = file_content.decode('cp1256')
-                except UnicodeDecodeError:
-                    decoded_file = file_content.decode('utf-8')
-
-            csv_file = io.StringIO(decoded_file)
-
-            rows = list(csv.reader(csv_file))
-
-        except Exception as e:
-            return Response(
-                {
-                    'success': False,
-                    'message': f'Could not read CSV file: {str(e)}'
-                },
-                status=400
-            )
-
-        if not rows:
-            return Response(
-                {
-                    'success': False,
-                    'message': 'The CSV file is empty.'
-                },
-                status=400
-            )
-
-        # -----------------------------------------------------
-        # Find actual transaction header row
-        #
-        # Karafarin CSV contains several information rows
-        # before the actual table header.
-        # -----------------------------------------------------
-
-        header_index = None
-
-        for index, row in enumerate(rows):
-
-            normalized_row = [
-                str(cell).strip()
-                for cell in row
-            ]
-
-            if (
-                'تاریخ تراکنش' in normalized_row
-                and 'شرح تراکنش' in normalized_row
-                and 'مبلغ واریز' in normalized_row
-                and 'مبلغ برداشت' in normalized_row
-            ):
-                header_index = index
-                break
-
+        header_index, column_indexes = self._find_transaction_header(rows)
         if header_index is None:
-            return Response(
-                {
-                    'success': False,
-                    'message': (
-                        'Invalid bank CSV format. '
-                        'Transaction header could not be found.'
-                    )
-                },
-                status=400
-            )
+            return Response({
+                'success': False,
+                'message': 'Invalid bank CSV format. Transaction header could not be found.',
+            }, status=400)
 
-        headers = [
-            str(h).strip()
-            for h in rows[header_index]
-        ]
-
-        # -----------------------------------------------------
-        # Helper: find column index
-        # -----------------------------------------------------
-
-        def get_column_index(column_name):
-            try:
-                return headers.index(column_name)
-            except ValueError:
-                return None
-
-        date_index = get_column_index('تاریخ تراکنش')
-        desc_index = get_column_index('شرح تراکنش')
-        deposit_index = get_column_index('مبلغ واریز')
-        withdrawal_index = get_column_index('مبلغ برداشت')
-
-        if (
-            date_index is None
-            or desc_index is None
-            or deposit_index is None
-            or withdrawal_index is None
-        ):
-            return Response(
-                {
-                    'success': False,
-                    'message': 'Required transaction columns are missing.'
-                },
-                status=400
-            )
-
-        # -----------------------------------------------------
-        # Helpers
-        # -----------------------------------------------------
-
-        def normalize_digits(value):
-            """
-            Convert Persian / Arabic digits to English digits.
-            """
-
-            if value is None:
-                return ''
-
-            value = str(value)
-
-            translation_table = str.maketrans(
-                '۰۱۲۳۴۵۶۷۸۹٠١٢٣٤٥٦٧٨٩',
-                '01234567890123456789'
-            )
-
-            return value.translate(translation_table)
-
-        def parse_amount(value):
-            """
-            Bank CSV amounts are Rial and may contain commas.
-
-            Example:
-                500,000,000
-            """
-
-            if value is None:
-                return Decimal('0')
-
-            value = normalize_digits(value)
-            value = value.strip()
-
-            if not value:
-                return Decimal('0')
-
-            value = value.replace(',', '')
-            value = value.replace('٬', '')
-            value = value.replace(' ', '')
-
-            try:
-                rial_amount = Decimal(value)
-
-                # Bank CSV = Rial
-                # Application = Toman
-                toman_amount = rial_amount / Decimal('10')
-
-                return toman_amount
-
-            except InvalidOperation:
-                return Decimal('0')
-
-        def parse_jalali_date(value):
-            """
-            Convert:
-                1405/06/14
-
-            to:
-                Gregorian date
-            """
-
-            if not value:
-                return None
-
-            value = normalize_digits(value).strip()
-
-            try:
-                year, month, day = [
-                    int(x)
-                    for x in value.split('/')
-                ]
-
-                jalali_date = jdatetime.date(
-                    year,
-                    month,
-                    day
-                )
-
-                return jalali_date.togregorian()
-
-            except Exception:
-                return None
-
-        # -----------------------------------------------------
-        # Import transactions
-        # -----------------------------------------------------
-
-        imported_count = 0
-        skipped_count = 0
-        error_count = 0
-
+        active_categories = list(Category.objects.filter(
+            user=request.user, is_active=True,
+        ))
+        imported_count = skipped_count = error_count = unmatched_count = 0
         errors = []
+        unmatched = []
 
-        data_rows = rows[header_index + 1:]
-
-        # -----------------------------------------------------
-        # Use DB transaction so import remains consistent.
-        # -----------------------------------------------------
-
+        # Imported statements may contain historical rows.  They are retained
+        # for reporting, but must not apply the account/budget delta a second
+        # time because those balances already represent the current state.
         with db_transaction.atomic():
-
-            for csv_row_number, row in enumerate(
-                data_rows,
-                start=header_index + 2
-            ):
-
+            for row_number, row in enumerate(rows[header_index + 1:], start=header_index + 2):
                 try:
-
-                    # Avoid malformed rows
-                    if len(row) <= max(
-                        date_index,
-                        desc_index,
-                        deposit_index,
-                        withdrawal_index
-                    ):
+                    parsed = self._parse_csv_row(row, column_indexes)
+                    if parsed is None:
                         skipped_count += 1
                         continue
-
-                    raw_date = row[date_index].strip()
-                    raw_desc = row[desc_index].strip()
-
-                    raw_deposit = row[deposit_index].strip()
-                    raw_withdrawal = row[withdrawal_index].strip()
-
-                    # Ignore completely empty rows
-                    if not raw_date and not raw_desc:
-                        continue
-
-                    # -------------------------------------------------
-                    # Determine transaction kind
-                    # -------------------------------------------------
-
-                    deposit_amount = parse_amount(raw_deposit)
-                    withdrawal_amount = parse_amount(raw_withdrawal)
-
-                    if deposit_amount > 0:
-
-                        amount = deposit_amount
-                        kind = 'income'
-
-                    elif withdrawal_amount > 0:
-
-                        amount = withdrawal_amount
-                        kind = 'expense'
-
-                    else:
-                        skipped_count += 1
-                        continue
-
-                    # -------------------------------------------------
-                    # Date
-                    # -------------------------------------------------
-
-                    transaction_date = parse_jalali_date(raw_date)
-
-                    if transaction_date is None:
-                        error_count += 1
-
-                        errors.append(
-                            {
-                                'row': csv_row_number,
-                                'message': (
-                                    f'Invalid date: {raw_date}'
-                                )
-                            }
-                        )
-
-                        continue
-
-                    # -------------------------------------------------
-                    # Description
-                    # -------------------------------------------------
-
-                    description = raw_desc[:255]
-
-                    if not description:
-                        description = 'Imported bank transaction'
-
-                    # -------------------------------------------------
-                    # Category
-                    # -------------------------------------------------
-
-                    if kind == 'income':
-
-                        category = income_category
-
-                    else:
-
-                        category = expense_category
-
-                    # Category is required by Transaction model.
-                    if category is None:
-
-                        error_count += 1
-
-                        errors.append(
-                            {
-                                'row': csv_row_number,
-                                'message': (
-                                    'No category selected for '
-                                    f'{kind} transaction.'
-                                )
-                            }
-                        )
-
-                        continue
-
-                    # -------------------------------------------------
-                    # Duplicate detection
-                    #
-                    # We intentionally do NOT use bank transaction ID
-                    # because the Karafarin CSV can contain multiple
-                    # rows with the same transaction ID.
-                    # -------------------------------------------------
-
-                    duplicate_exists = Transaction.objects.filter(
-                        user=request.user,
-                        account=account,
-                        date=transaction_date,
-                        amount=amount,
-                        kind=kind,
-                        desc=description
-                    ).exists()
-
-                    if duplicate_exists:
-
-                        skipped_count += 1
-                        continue
-
-                    # -------------------------------------------------
-                    # Create transaction
-                    #
-                    # Existing post_save signals will automatically:
-                    # - update account balance
-                    # - update budget
-                    # - create budget notifications
-                    # -------------------------------------------------
-
-                    Transaction.objects.create(
-                        user=request.user,
-                        date=transaction_date,
-                        amount=amount,
-                        desc=description,
-                        kind=kind,
-                        account=account,
-                        category=category
-                    )
-
-                    imported_count += 1
-
-                except Exception as e:
-
+                    transaction_date, description, amount, kind = parsed
+                except ValueError as error:
                     error_count += 1
+                    errors.append({'row': row_number, 'message': str(error)})
+                    continue
 
-                    errors.append(
-                        {
-                            'row': csv_row_number,
-                            'message': str(e)
-                        }
-                    )
+                category = classify_transaction(description, kind, active_categories)
+                if category is None:
+                    unmatched_count += 1
+                    unmatched.append({
+                        'row': row_number, 'description': description, 'kind': kind,
+                        'message': 'No matching active category was found.',
+                    })
+                    continue
 
-        # ---------------------------------------------------------
-        # Response
-        # ---------------------------------------------------------
+                if Transaction.objects.filter(
+                    user=request.user, account=account, date=transaction_date,
+                    amount=amount, kind=kind, desc=description,
+                ).exists():
+                    skipped_count += 1
+                    continue
 
-        return Response(
-            {
-                'success': True,
-                'message': 'CSV import completed.',
-                'imported': imported_count,
-                'skipped': skipped_count,
-                'errors_count': error_count,
-                'errors': errors[:20]
-            }
-        )
+                imported_transaction = Transaction(
+                    user=request.user, date=transaction_date, amount=amount,
+                    desc=description, kind=kind, account=account, category=category,
+                    affects_financial_totals=False,
+                )
+                imported_transaction.save()
+                imported_count += 1
+
+        return Response({
+            'success': True,
+            'message': 'CSV import completed.',
+            'imported': imported_count,
+            'skipped': skipped_count,
+            'errors_count': error_count,
+            'errors': errors[:20],
+            'unmatched_count': unmatched_count,
+            'unmatched': unmatched[:20],
+        })
+
+    @staticmethod
+    def _read_csv_rows(file_content):
+        for encoding in ('utf-8-sig', 'cp1256'):
+            try:
+                return list(csv.reader(io.StringIO(file_content.decode(encoding))))
+            except UnicodeDecodeError:
+                continue
+        raise ValueError('Could not read CSV file: unsupported encoding.')
+
+    @staticmethod
+    def _find_transaction_header(rows):
+        required = ('تاریخ تراکنش', 'شرح تراکنش', 'مبلغ واریز', 'مبلغ برداشت')
+        normalized_required = tuple(normalize_text(name) for name in required)
+        for index, row in enumerate(rows):
+            headers = [normalize_text(cell) for cell in row]
+            if all(name in headers for name in normalized_required):
+                return index, {name: headers.index(name) for name in normalized_required}
+        return None, None
+
+    @staticmethod
+    def _parse_csv_row(row, column_indexes):
+        if len(row) <= max(column_indexes.values()):
+            return None
+        raw_date = row[column_indexes[normalize_text('تاریخ تراکنش')]].strip()
+        raw_description = row[column_indexes[normalize_text('شرح تراکنش')]].strip()
+        if not raw_date and not raw_description:
+            return None
+        deposit = TransactionViewSet._parse_amount(row[column_indexes[normalize_text('مبلغ واریز')]])
+        withdrawal = TransactionViewSet._parse_amount(row[column_indexes[normalize_text('مبلغ برداشت')]])
+        if deposit > 0:
+            amount, kind = deposit, 'income'
+        elif withdrawal > 0:
+            amount, kind = withdrawal, 'expense'
+        else:
+            return None
+        try:
+            year, month, day = (int(part) for part in normalize_text(raw_date).replace('-', '/').split('/'))
+            transaction_date = jdatetime.date(year, month, day).togregorian()
+        except (TypeError, ValueError, OverflowError):
+            raise ValueError(f'Invalid date: {raw_date}')
+        description = normalize_text(raw_description)[:255] or 'Imported bank transaction'
+        return transaction_date, description, amount, kind
+
+    @staticmethod
+    def _parse_amount(value):
+        normalized = normalize_text(value).replace(',', '').replace('٬', '').replace(' ', '')
+        if not normalized:
+            return Decimal('0')
+        try:
+            return Decimal(normalized) / Decimal('10')
+        except InvalidOperation:
+            raise ValueError(f'Invalid amount: {value}')
 
     # =========================================================
     # GROUPED

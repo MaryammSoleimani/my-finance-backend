@@ -6,7 +6,8 @@ from notifications.models import Notification
 
 @receiver(post_save, sender=Transaction)
 def create_notifications(sender, instance, created, **kwargs):
-    if not created or instance.kind != 'expense':
+    if (not created or instance.kind != 'expense' or
+            not instance.affects_financial_totals):
         return
 
     budget = Budget.objects.filter(user=instance.user,category=instance.category).first()
@@ -43,7 +44,8 @@ def create_notifications(sender, instance, created, **kwargs):
 
 @receiver(post_save, sender=Transaction)
 def update_budget(sender, instance, created, **kwargs):
-    if created and instance.kind == 'expense':
+    if (created and instance.kind == 'expense' and
+            instance.affects_financial_totals):
         budget = Budget.objects.filter(
             user=instance.user,
             category=instance.category
@@ -56,7 +58,7 @@ def update_budget(sender, instance, created, **kwargs):
 
 @receiver(post_delete, sender=Transaction)
 def restore_budget(sender, instance, **kwargs):
-    if instance.kind == 'expense':
+    if instance.kind == 'expense' and instance.affects_financial_totals:
         budget = Budget.objects.filter(
             user=instance.user,
             category=instance.category
@@ -69,7 +71,7 @@ def restore_budget(sender, instance, **kwargs):
 
 @receiver(post_save, sender=Transaction)
 def update_account_balance(sender, instance, created, **kwargs):
-    if created:
+    if created and instance.affects_financial_totals:
         account = instance.account
         from decimal import Decimal
         amount = Decimal(str(instance.amount))
@@ -84,6 +86,8 @@ def update_account_balance(sender, instance, created, **kwargs):
 
 @receiver(post_delete, sender=Transaction)
 def restore_account_balance(sender, instance, **kwargs):
+    if not instance.affects_financial_totals:
+        return
     account = instance.account
     from decimal import Decimal
     amount = Decimal(str(instance.amount))
