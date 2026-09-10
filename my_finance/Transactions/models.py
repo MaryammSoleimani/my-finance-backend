@@ -18,9 +18,6 @@ class Transaction(models.Model):
     kind = models.CharField(max_length=10, choices=KIND_CHOICES, default='expense')
     account = models.ForeignKey(Account, on_delete=models.CASCADE, related_name='transactions')
     category = models.ForeignKey(Category, on_delete=models.CASCADE, related_name='transactions')
-    # Imported historical statements are already reflected in the account's
-    # current balance, so their lifecycle must not apply balance/budget deltas.
-    affects_financial_totals = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
