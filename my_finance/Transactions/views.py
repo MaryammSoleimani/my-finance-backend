@@ -126,8 +126,7 @@ class TransactionViewSet(viewsets.ModelViewSet):
                         'kind': kind,
                         'account_id': account.id,
                         'account_name': account.name,
-                        # ❌ حذف: 'user': request.user,  ← این مشکل رو ایجاد میکنه
-                        # ❌ حذف: 'account': account,     ← این هم مشکل داره
+
                     })
                     unmatched_count += 1
                     continue
@@ -277,7 +276,7 @@ class TransactionViewSet(viewsets.ModelViewSet):
         if not normalized:
             return Decimal('0')
         try:
-            return Decimal(normalized) / Decimal('10')
+            return Decimal(normalized)
         except InvalidOperation:
             raise ValueError(f'Invalid amount: {value}')
 

@@ -4,8 +4,7 @@ import jdatetime
 
 class AssetSerializer(serializers.ModelSerializer):
     amount_toman = serializers.SerializerMethodField()
-    created_at_shamsi = serializers.SerializerMethodField()
-    updated_at_shamsi = serializers.SerializerMethodField()
+
 
     class Meta:
         model = Asset
