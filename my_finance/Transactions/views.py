@@ -276,7 +276,7 @@ class TransactionViewSet(viewsets.ModelViewSet):
         if not normalized:
             return Decimal('0')
         try:
-            return Decimal(normalized)
+            return Decimal(normalized) / Decimal('10')
         except InvalidOperation:
             raise ValueError(f'Invalid amount: {value}')
 
